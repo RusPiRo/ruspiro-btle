@@ -1,0 +1,36 @@
+[package]
+name = "ruspiro-btle"
+authors = ["André Borrmann <pspwizard@gmx.de>"]
+version = "0.1.0" # remember to update html_root_url
+description = "Raspberry Pi bluetooth low energy interface API."
+license = "Apache-2.0"
+repository = "https://github.com/RusPiRo/ruspiro-btle/tree/v0.1.0"
+documentation = "https://docs.rs/ruspiro-btle/0.1.0"
+readme = "README.md"
+keywords = ["RusPiRo", "bluetooth", "ble", "raspberrypi", "baremetal"]
+categories = ["no-std", "embedded"]
+edition = "2018"
+
+[badges]
+travis-ci = { repository = "RusPiRo/ruspiro-btle", branch = "master" }
+maintenance = { status = "actively-developed" }
+
+[lib]
+
+[dependencies]
+paste = "0.1.5"
+pin-utils = "0.1.0-alpha.4"
+ruspiro-register = { path = "../register", version = "0.4" }
+ruspiro-singleton = { path = "../singleton", version = "0.3" }
+ruspiro-lock = { path = "../lock", version = "0.3" }
+ruspiro-uart = { path = "../uart", version = "0.3" }
+ruspiro-cache = { path = "../cache", version = "0.3" }
+ruspiro-console = { path = "../console", version = "0.3" }
+ruspiro-brain = { path = "../brain", features = ["singlecore"] }
+ruspiro-interrupt = { path = "../interrupt", version = "0.3" }
+ruspiro-timer = { path = "../timer", version = "0.4" }
+
+[features]
+ruspiro_pi3 = [
+    "ruspiro-uart/ruspiro_pi3",
+    "ruspiro-brain/ruspiro_pi3"]
