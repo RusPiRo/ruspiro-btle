@@ -5,57 +5,49 @@
  * License: Apache License 2.0
  **************************************************************************************************/
 
-//! # HCI Command Comletion Event
+//! # HCI Connection Request Event
 //!
 
 use crate::alloc::vec::Vec;
 use crate::convert::TryFrom;
 use crate::hci::events::{HciEventHeader, HciEventType};
 use crate::hci::packet::HciPacket;
+use crate::hci::connection::{
+    HciConnectionLinkType,
+    HciEncryptionType,
+};
 
 /// The CommandComplete event will be send/received if the processing of a command has been finished
 #[repr(C, packed)]
 #[derive(Debug)]
-pub struct HciEventInquiryResponse {
+pub struct HciEventConnectionComplete {
     header: HciEventHeader,
-    num_devices: u8,
-    pub data: Vec<HciEventInquiryResponseData>,
-}
-
-#[repr(C, packed)]
-#[derive(Copy, Clone, Debug)]
-pub struct HciEventInquiryResponseData {
+    status: u8,
+    handle: u16, //only the least 12Bit's uses
     address: [u8; 6],
-    page_scan_repetition: u8,
-    reserved: u16,
-    class_of_device: [u8; 3],
-    clock_offset: u16,
+    link_type: HciConnectionLinkType,
+    encryption_mode: HciEncryptionType,
 }
 
-impl TryFrom<HciPacket<Vec<u8>>> for HciEventInquiryResponse {
+impl TryFrom<HciPacket<Vec<u8>>> for HciEventConnectionComplete {
     type Error = HciPacket<Vec<u8>>;
 
     fn try_from(orig: HciPacket<Vec<u8>>) -> Result<Self, Self::Error> {
         let raw_event = orig.p_data;
-        if raw_event[0] == HciEventType::InquiryResult as u8 {
-            // convert the binary payload into the structure
-            let length = raw_event[2] as usize;
-            let mut data = Vec::with_capacity(length);
-            let data_ptr = &raw_event[3] as *const u8 as *const HciEventInquiryResponseData;
-            for i in 0..length {
-                let response_data =
-                    unsafe { core::ptr::read_volatile(data_ptr.offset(i as isize)) };
-                data.push(response_data);
-            }
-
-            Ok(HciEventInquiryResponse {
+        if raw_event[0] == HciEventType::ConnectionComplete as u8 {
+            let mut event = HciEventConnectionComplete {
                 header: HciEventHeader {
                     evt_code: raw_event[0].into(),
                     param_length: raw_event[1],
                 },
-                num_devices: raw_event[2],
-                data,
-            })
+                status: raw_event[2],
+                handle: raw_event[3] as u16 | (raw_event[4] as u16) << 8,
+                address: [0; 6],
+                link_type: raw_event[11].into(),
+                encryption_mode: raw_event[12].into(),
+            };
+            event.address.copy_from_slice(&raw_event[5..11]);
+            Ok(event)
         } else {
             Err(HciPacket {
                 p_type: orig.p_type,

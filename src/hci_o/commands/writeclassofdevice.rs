@@ -4,29 +4,34 @@
  * Author: André Borrmann
  * License: Apache License 2.0
  **************************************************************************************************/
-//! # HCI Reset Command
+//! # HCI ClassOfDevice Command
 //!
 
+use crate::alloc::vec::Vec;
 use super::{get_command_size, HciCommand, HciCommandHeader, IsHciCommand};
 
+const CLASS_SIZE: usize = 3;
+
 #[repr(C, packed)]
-#[derive(Debug, Copy, Clone)]
-pub struct HciCommandReset {
+#[derive(Debug)]
+pub struct HciCommandWriteClassOfDevice {
     header: HciCommandHeader,
+    device_class: [u8; CLASS_SIZE],
 }
 
-impl HciCommandReset {
-    pub fn new() -> Self {
+impl HciCommandWriteClassOfDevice {
+    pub fn new(device_class: [u8; CLASS_SIZE]) -> Self {
         Self {
             header: HciCommandHeader {
-                op_code: HciCommand::Reset,
-                param_length: get_command_size::<Self>(),
+                op_code: HciCommand::WriteClassOfDevice,
+                param_length: device_class.len() as u8,
             },
+            device_class
         }
     }
 }
 
-impl IsHciCommand for HciCommandReset {
+impl IsHciCommand for HciCommandWriteClassOfDevice {
     fn op_code(&self) -> HciCommand {
         self.header.op_code
     }

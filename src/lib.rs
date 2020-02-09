@@ -15,16 +15,16 @@
 //!
 
 extern crate alloc;
-use alloc::sync::Arc;
-use ruspiro_brain;
-use ruspiro_console;
-use ruspiro_interrupt;
-use ruspiro_lock;
-use ruspiro_register;
-use ruspiro_singleton;
-use ruspiro_uart;
+use ruspiro_brain as brain;
+use ruspiro_core::*;
+use ruspiro_lock as lock;
+use ruspiro_singleton as singleton;
+pub use ruspiro_uart as uart;
 
-pub type SharedTransport = Arc<ruspiro_singleton::Singleton<ruspiro_uart::Uart0>>;
+//pub type SharedTransport = Arc<ruspiro_singleton::Singleton<ruspiro_uart::Uart0>>;
 
-mod hci;
-pub use hci::*;
+pub mod hci;
+mod hctl;
+
+//mod hci;
+//pub use hci::*;

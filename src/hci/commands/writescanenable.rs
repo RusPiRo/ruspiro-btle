@@ -7,7 +7,6 @@
 //! # HCI ClassOfDevice Command
 //!
 
-use crate::alloc::vec::Vec;
 use super::{get_command_size, HciCommand, HciCommandHeader, IsHciCommand};
 
 const NAME_SIZE: usize = 248;
@@ -40,4 +39,8 @@ impl HciCommandWriteScanEnable {
     }
 }
 
-impl IsHciCommand for HciCommandWriteScanEnable {}
+impl IsHciCommand for HciCommandWriteScanEnable {
+    fn op_code(&self) -> HciCommand {
+        self.header.op_code
+    }
+}

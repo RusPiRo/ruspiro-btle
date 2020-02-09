@@ -7,8 +7,7 @@
 //! # HCI ClassOfDevice Command
 //!
 
-use crate::alloc::vec::Vec;
-use super::{get_command_size, HciCommand, HciCommandHeader, IsHciCommand};
+use super::{HciCommand, HciCommandHeader, IsHciCommand};
 
 const CLASS_SIZE: usize = 3;
 
@@ -26,9 +25,13 @@ impl HciCommandWriteClassOfDevice {
                 op_code: HciCommand::WriteClassOfDevice,
                 param_length: device_class.len() as u8,
             },
-            device_class
+            device_class,
         }
     }
 }
 
-impl IsHciCommand for HciCommandWriteClassOfDevice {}
+impl IsHciCommand for HciCommandWriteClassOfDevice {
+    fn op_code(&self) -> HciCommand {
+        self.header.op_code
+    }
+}

@@ -7,8 +7,7 @@
 //! # HCI Vendor BCM Command
 //!
 
-use crate::alloc::vec::Vec;
-use super::{get_command_size, HciCommand, HciCommandHeader, IsHciCommand};
+use super::{HciCommand, HciCommandHeader, IsHciCommand};
 
 #[repr(C, packed)]
 //#[derive(Copy, Clone)]
@@ -33,9 +32,10 @@ impl HciCommandVendorBcm {
 }
 
 impl IsHciCommand for HciCommandVendorBcm {
-    /*fn op_code(&self) -> HciCommand {
+    fn op_code(&self) -> HciCommand {
         self.header.op_code
-    }*/
+    }
+
     fn size(&self) -> usize {
         core::mem::size_of::<HciCommandHeader>() + self.header.param_length as usize
     }
@@ -43,7 +43,9 @@ impl IsHciCommand for HciCommandVendorBcm {
 
 impl core::fmt::Debug for HciCommandVendorBcm {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "HciCommandVendorBcm {{ header: {{ {:?} }}, data: {{ size: {} }} }}",
+        write!(
+            f,
+            "HciCommandVendorBcm {{ header: {{ {:?} }}, data: {{ size: {} }} }}",
             self.header,
             self.data.len()
         )

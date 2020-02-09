@@ -8,10 +8,10 @@
 //! # HCI Command Comletion Event
 //!
 
+use core::convert::TryFrom;
+use super::HciEventHeader;
 use crate::alloc::vec::Vec;
-use crate::convert::TryFrom;
-use crate::hci::events::{HciEventHeader, HciEventType};
-use crate::hci::packet::HciPacket;
+use crate::{HciPacket, HciEventType};
 
 /// The CommandComplete event will be send/received if the processing of a command has been finished
 #[repr(C, packed)]
@@ -43,24 +43,29 @@ impl TryFrom<HciPacket<Vec<u8>>> for HciEventInquiryResponse {
             let mut data = Vec::with_capacity(length);
             let data_ptr = &raw_event[3] as *const u8 as *const HciEventInquiryResponseData;
             for i in 0..length {
-                let response_data =
-                    unsafe { core::ptr::read_volatile(data_ptr.offset(i as isize)) };
+                let response_data = unsafe {
+                    core::ptr::read_volatile(data_ptr.offset(i as isize))
+                };
                 data.push(response_data);
             }
-
-            Ok(HciEventInquiryResponse {
-                header: HciEventHeader {
-                    evt_code: raw_event[0].into(),
-                    param_length: raw_event[1],
-                },
-                num_devices: raw_event[2],
-                data,
-            })
+            
+            Ok(
+                HciEventInquiryResponse {
+                    header: HciEventHeader {
+                        evt_code: raw_event[0].into(),
+                        param_length: raw_event[1],
+                    },
+                    num_devices: raw_event[2],
+                    data,
+                }
+            )
         } else {
-            Err(HciPacket {
-                p_type: orig.p_type,
-                p_data: raw_event,
-            })
+            Err(
+                HciPacket {
+                    p_type: orig.p_type,
+                    p_data: raw_event,
+                }
+            )
         }
     }
 }

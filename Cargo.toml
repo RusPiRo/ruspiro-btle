@@ -19,7 +19,7 @@ maintenance = { status = "actively-developed" }
 
 [dependencies]
 paste = "0.1.5"
-pin-utils = "0.1.0-alpha.4"
+ruspiro-core = { path = "../core", version = "*" }
 ruspiro-register = { path = "../register", version = "0.4" }
 ruspiro-singleton = { path = "../singleton", version = "0.3" }
 ruspiro-lock = { path = "../lock", version = "0.3" }

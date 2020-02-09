@@ -7,7 +7,8 @@
 //! # HCI ClassOfDevice Command
 //!
 
-use super::{HciCommand, HciCommandHeader, IsHciCommand};
+use crate::alloc::vec::Vec;
+use super::{get_command_size, HciCommand, HciCommandHeader, IsHciCommand};
 
 const NAME_SIZE: usize = 248;
 
@@ -36,7 +37,7 @@ impl IsHciCommand for HciCommandWriteLocalName {
     fn op_code(&self) -> HciCommand {
         self.header.op_code
     }
-
+    
     fn size(&self) -> usize {
         core::mem::size_of::<HciCommandHeader>() + self.header.param_length as usize
     }
@@ -44,9 +45,7 @@ impl IsHciCommand for HciCommandWriteLocalName {
 
 impl core::fmt::Debug for HciCommandWriteLocalName {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            "HciCommandWriteLocalName {{ header: {{ {:?} }}, data: {{ size: {} }} }}",
+        write!(f, "HciCommandWriteLocalName {{ header: {{ {:?} }}, data: {{ size: {} }} }}",
             self.header,
             self.local_name.len()
         )

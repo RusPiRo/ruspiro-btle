@@ -4,51 +4,49 @@
  * Author: André Borrmann
  * License: Apache License 2.0
  **************************************************************************************************/
-//! # HCI ClassOfDevice Command
+//! # HCI Vendor BCM Command
 //!
 
-use super::{HciCommand, HciCommandHeader, IsHciCommand};
-
-const NAME_SIZE: usize = 248;
+use crate::alloc::vec::Vec;
+use super::{get_command_size, HciCommand, HciCommandHeader, IsHciCommand};
 
 #[repr(C, packed)]
-pub struct HciCommandWriteLocalName {
+//#[derive(Copy, Clone)]
+pub struct HciCommandVendorBcm {
     header: HciCommandHeader,
-    local_name: [u8; NAME_SIZE],
+    data: [u8; 256],
 }
 
-impl HciCommandWriteLocalName {
-    pub fn new(local_name: &[u8]) -> Self {
+impl HciCommandVendorBcm {
+    pub fn new(op_code: HciCommand, data: &[u8]) -> Self {
         let mut command = Self {
             header: HciCommandHeader {
-                op_code: HciCommand::WriteLocalName,
-                param_length: local_name.len() as u8,
+                op_code,
+                param_length: data.len() as u8,
             },
-            local_name: [0; NAME_SIZE],
+            data: [0; 256],
         };
 
-        command.local_name[..local_name.len()].copy_from_slice(local_name);
+        command.data[..data.len()].copy_from_slice(data);
         command
     }
 }
 
-impl IsHciCommand for HciCommandWriteLocalName {
+impl IsHciCommand for HciCommandVendorBcm {
     fn op_code(&self) -> HciCommand {
         self.header.op_code
     }
-
+    
     fn size(&self) -> usize {
         core::mem::size_of::<HciCommandHeader>() + self.header.param_length as usize
     }
 }
 
-impl core::fmt::Debug for HciCommandWriteLocalName {
+impl core::fmt::Debug for HciCommandVendorBcm {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            "HciCommandWriteLocalName {{ header: {{ {:?} }}, data: {{ size: {} }} }}",
+        write!(f, "HciCommandVendorBcm {{ header: {{ {:?} }}, data: {{ size: {} }} }}",
             self.header,
-            self.local_name.len()
+            self.data.len()
         )
     }
 }

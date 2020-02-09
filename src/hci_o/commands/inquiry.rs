@@ -10,9 +10,9 @@
 use super::{get_command_size, HciCommand, HciCommandHeader, IsHciCommand};
 
 pub enum InquiryLength {
-    Min,     // minimum inquiry length 1.28s
-    Max,     // maximum inquiry length 61.44s
-    Sec(u8), // inquiry length in seconds: ((seconds) * 100 + 64) / 128
+    Min, // minimum inquiry length 1.28s
+    Max, // maximum inquiry length 61.44s
+    Sec(u8),    // inquiry length in seconds: ((seconds) * 100 + 64) / 128
 }
 
 #[repr(C, packed)]

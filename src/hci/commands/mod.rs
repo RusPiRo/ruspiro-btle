@@ -11,13 +11,16 @@
 //! Raspberry Pi
 //!
 
-use crate::alloc::{sync::Arc, vec::Vec};
-use crate::ruspiro_brain::*;
-use crate::ruspiro_lock::DataLock;
-use crate::{HciPacket, SharedTransportLayer};
-use core::mem::size_of;
-use core::pin::Pin;
-use ruspiro_console::*;
+use super::errors::*;
+use super::events::*;
+use super::packet::*;
+use super::*;
+use crate::alloc::{boxed::Box, collections::BTreeMap, sync::Arc};
+use crate::brain::*;
+use crate::hctl::HcTransportLayer;
+use crate::mem::size_of;
+use crate::pin::Pin;
+use crate::pin_utils::*;
 
 mod reset;
 pub use reset::*;
@@ -33,6 +36,8 @@ mod vendorbcm;
 pub use vendorbcm::*;
 mod inquiry;
 pub use inquiry::*;
+mod acceptconnection;
+pub use acceptconnection::*;
 
 const LINK_COMMANDS: u16 = 0x1 << 10;
 const BASEBAND_COMMANDS: u16 = 0x03 << 10;
@@ -45,13 +50,14 @@ pub enum HciCommand {
     Unknown = 0x0,
     // OGF_LINK_CONTROL
     Inquiry = LINK_COMMANDS | 0x01,
+    CreateConnection = LINK_COMMANDS | 0x05,
+    AcceptConnection = LINK_COMMANDS | 0x09,
 
     // OGF_CONTROL_BASEBAND
     Reset = BASEBAND_COMMANDS | 0x03,
     WriteLocalName = BASEBAND_COMMANDS | 0x13,
     WriteScanEnable = BASEBAND_COMMANDS | 0x1A,
     WriteClassOfDevice = BASEBAND_COMMANDS | 0x24,
-
 
     // OGF_INFO_COMMANDS
     ReadVersionInfo = INFORMATION_COMMANDS | 0x01,
@@ -67,6 +73,8 @@ impl From<u16> for HciCommand {
     fn from(orig: u16) -> Self {
         match orig {
             _ if orig == HciCommand::Inquiry as u16 => HciCommand::Inquiry,
+            _ if orig == HciCommand::CreateConnection as u16 => HciCommand::CreateConnection,
+            _ if orig == HciCommand::AcceptConnection as u16 => HciCommand::AcceptConnection,
             _ if orig == HciCommand::Reset as u16 => HciCommand::Reset,
             _ if orig == HciCommand::WriteClassOfDevice as u16 => HciCommand::WriteClassOfDevice,
             _ if orig == HciCommand::WriteScanEnable as u16 => HciCommand::WriteScanEnable,
@@ -91,127 +99,137 @@ const fn get_command_size<T>() -> u8 {
 }
 
 pub trait IsHciCommand: Sized + core::fmt::Debug {
-    //fn op_code(&self) -> HciCommand;
+    fn op_code(&self) -> HciCommand;
     fn size(&self) -> usize {
         core::mem::size_of::<Self>()
     }
 }
 
-struct HciCommandContext<CMD: IsHciCommand> {
-    command: CMD,
-    response: Option<HciPacket<Vec<u8>>>,
-    stage: HciCommandStage,
-    transport: SharedTransportLayer,
+pub struct SendCommandThinkable<C, T>
+where
+    C: commands::IsHciCommand,
+    T: HcTransportLayer + 'static,
+{
+    hci: Arc<DataLock<Hci<T>>>,
+    op_code: commands::HciCommand,
+    packet: Option<packet::HciPacket<C>>,
 }
 
-pub struct HciCommandThought<CMD: IsHciCommand, R> {
-    context: Arc<DataLock<HciCommandContext<CMD>>>,
-    _r: core::marker::PhantomData<R>,
-}
+impl<C, T> SendCommandThinkable<C, T>
+where
+    C: commands::IsHciCommand,
+    T: HcTransportLayer,
+{
+    unsafe_unpinned!(packet: Option<packet::HciPacket<C>>);
+    unsafe_unpinned!(hci: Arc<DataLock<Hci<T>>>);
 
-enum HciCommandStage {
-    Sending,
-    Pending,
-    Done,
-}
-
-
-/*
-//impl<CMD: IsHciCommand> Unpin for HciCommandThought<CMD> {}
-
-impl<CMD: IsHciCommand, R> HciCommandThought<CMD, R> {
-    pub fn new(transport: SharedTransportLayer, command: CMD) -> Self {
-        HciCommandThought {
-            context: Arc::new(DataLock::new(HciCommandContext {
-                command,
-                response: None,
-                stage: HciCommandStage::Sending,
-                transport,
-            })),
-            _r: core::marker::PhantomData,
+    pub fn new(command: C, hci: Arc<DataLock<Hci<T>>>) -> Self {
+        Self {
+            hci,
+            op_code: command.op_code(),
+            packet: Some(packet::HciPacket {
+                p_type: packet::HciPacketType::Command,
+                p_data: command,
+            }),
         }
     }
 }
 
-impl<CMD, R> Thought for HciCommandThought<CMD, R>
+impl<C, T> Thinkable for SendCommandThinkable<C, T>
 where
-    CMD: IsHciCommand + 'static,
-    R: From<HciPacket<Vec<u8>>>,
+    C: commands::IsHciCommand,
+    T: HcTransportLayer,
 {
-    type Output = R;
+    type Output = Result<(), BoxError>;
 
-    /// Think on this HciCommand will go through the following stages:
-    /// 1. Sending: when Thought the first time the command will be send to the BT Host using the
-    ///     TransportLayer. As part of this the Though registers its waker to be waken once the BT Host
-    ///     responds with the completion of the command processing.
-    /// 2. Pending: when the Thought is woken up due to data received from the BT Host the response
-    ///     will be taken and the Thought has come to a conclusion
-    /// 3. Done: This indicates the thought was woken and was thought on after it has been already
-    ///     come to a conclusion - this is treated as implementation error
-    fn think(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Conclusion<Self::Output> {
-        let command_ctx_clone = self.context.clone();
-        let mut command_ctx = self.context.lock();
-        match command_ctx.stage {
-            HciCommandStage::Sending => {
-                // send the command and pass a closure as call back that shall be called as soon as
-                // the BT Host responds with data. This callback will store the response in the
-                // Thought and wake the same
-                command_ctx.transport.take_for(|trans| {
-                    let waker = cx.waker().clone();
-                    /*trans.send_packet(command_ctx.command.into(), move |response| {
-                        let mut command_ctx = command_ctx_clone.lock();
-                        command_ctx.response.replace(response);
-                        drop(command_ctx);
-                        waker.wake_by_ref();
-                        println!("woken the thought");
-                    });*/
-                });
-                // set the current stage of the Thought to pending
-                command_ctx.stage = HciCommandStage::Pending;
+    fn think(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Conclusion<Self::Output> {
+        // if there is a packet set this has not been passed to the host
+        if self.packet.is_some() {
+            // as we are about to progress, get the waker that will be registered fot this thinkable
+            let waker = cx.waker().clone();
+            // check if the host controller is able to accept a command
+            let accept_commands = self.hci.read().accept_commands.load(Ordering::Acquire);
+            if accept_commands >= 1 {
+                self.hci
+                    .read()
+                    .accept_commands
+                    .fetch_sub(1, Ordering::SeqCst);
+                info!("send to host {:?}", self.packet);
+                // the host accepts this packet, so send it
+                let op_code = self.op_code;
+                let packet = self.as_mut().packet().take().unwrap();
+                let mut hci = self.as_mut().hci().lock();
+                hci.command_response.insert(op_code, (waker, None));
+                if let Some(ref mut transport) = hci.transport_layer {
+                    let _ = transport.send_packet(unsafe { packet.as_array_ref() });
+                }
+                Conclusion::Pending
+            } else {
+                info!("no more packets free to send to the host");
+                // we need to wait until we can send this packet to the host.
+                // register our wakre to wake this thinkable once data has been received as than
+                // we might be able to send this packet
+                //self.hci().lock().command_to_send_waker.push(waker);
                 Conclusion::Pending
             }
-            HciCommandStage::Pending => {
-                if command_ctx.response.is_some() {
-                    command_ctx.stage = HciCommandStage::Done;
-                    println!("changed stage, response: {:X?}", command_ctx.response);
-                    Conclusion::Ready(command_ctx.response.take().unwrap().into())
+        } else {
+            let op_code = self.op_code;
+            // being here means we have send the packet and data has been received
+            // so read the data, it should be the corresponding response?
+            let mut hci = self.hci().lock();
+            // get the response assigned to the opcode from the receiver thinkable
+            if let Some(response) = hci.command_response.get_mut(&op_code) {
+                // if there has been a response assigned
+                if let Some(event) = response.1.take() {
+                    // we are done based on the response. If it was a CommandComplete event
+                    // we are done, if it is a CommandStatus event it depenmds on the returned status
+                    match events::HciEventCommandComplete::try_from(event) {
+                        Ok(complete) => {
+                            // the completion of a command also indicates how many commands will be
+                            // accepted from the host now
+                            hci.accept_commands
+                                .store(complete.num_cmd_packets, Ordering::Release);
+                            // remove the waker for this command
+                            hci.command_response.remove(&op_code);
+                            Conclusion::Ready(Ok(()))
+                        }
+                        Err(event) => match events::HciEventCommandStatus::try_from(event) {
+                            Ok(status) => {
+                                if status.status == 0x00 {
+                                    // the status of a command also indicates how many commands will be
+                                    // accepted from the host now
+                                    hci.accept_commands
+                                        .store(status.num_cmd_packets, Ordering::Release);
+                                    // remove the waker for this command
+                                    hci.command_response.remove(&op_code);
+                                    Conclusion::Ready(Ok(()))
+                                } else {
+                                    warn!("cmd {:?} failed with status {:?}", op_code, status.status);
+                                    Conclusion::Ready(Err(Box::new(HciError {})))
+                                }
+                            }
+                            Err(_) => Conclusion::Pending,
+                        },
+                    }
                 } else {
+                    // we got waken but there was no response assigned to our command so let's get
+                    // waken again, the waker keeps registered and needs no re-registration
                     Conclusion::Pending
                 }
+            } else {
+                // well we got waken but there is nothing registered for this command to wait for
+                // the incoming data, where is this coming from ?
+                error!("Unknown reason for beeing woken");
+                unimplemented!();
             }
-            HciCommandStage::Done => unimplemented!(),
+            /*
+            // in case ther was no packet for us let's get woken with the next receiving..
+            let waker = cx.waker().clone();
+            self.hci().lock().command_response_waker.push(waker);
+
+            // pending for the time beeing
+            Conclusion::Pending
+            */
         }
-
-        /*
-        let (next_stage, conclusion) = match &this.stage {
-            HciCommandStage::Sending => {
-                let waker = cx.waker().clone();
-                println!("Cmd: {:?}", this.command);
-                let command = HciCommandReset::new();//this.command;
-                let command = this.command.take().unwrap();
-                println!("Cmd: {:?}", this.command);
-
-                let response = this.response.clone();
-                this.transport.take_for(|transport| transport.send_packet(
-                    HciPacket::new_command(command),
-                    move |cmd_response| {
-                        response.take_for(|rsp| rsp.replace(cmd_response));
-                        waker.wake_by_ref();
-                    }
-                ));
-
-                (HciCommandStage::Pending, Conclusion::Pending)
-            },
-            HciCommandStage::Pending => {
-                println!("command completed with {:?}", this.response.take_for(|resp| resp.take()));
-                (HciCommandStage::Done, Conclusion::Ready(()))
-            },
-            HciCommandStage::Done => unimplemented!(),
-        };
-
-        this.stage = next_stage;
-        conclusion
-        */
     }
 }
-*/

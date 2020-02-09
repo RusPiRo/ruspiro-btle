@@ -10,6 +10,7 @@
 //! execution has been finished
 //!
 
+use crate::alloc::vec::Vec;
 mod commandcomplete;
 pub use commandcomplete::*;
 mod commandstatus;
@@ -20,8 +21,6 @@ mod inquirycomplete;
 pub use inquirycomplete::*;
 mod connectionrequest;
 pub use connectionrequest::*;
-mod connectioncomplete;
-pub use connectioncomplete::*;
 
 #[repr(u8)]
 #[derive(Eq, PartialEq, Ord, PartialOrd, Debug, Copy, Clone)]

@@ -1,85 +1,99 @@
-/*************************************************************************************************** 
+/***************************************************************************************************
  * Copyright (c) 2019 by the authors
- * 
- * Author: André Borrmann 
+ *
+ * Author: André Borrmann
  * License: Apache License 2.0
  **************************************************************************************************/
 
 //! # Firmware related Thoughts
-//! 
+//!
 
+use super::commands::{HciCommand, HciCommandVendorBcm, SendCommandThinkable};
+use super::errors::*;
+use super::packet::*;
 use super::*;
+use crate::hctl::HcTransportLayer;
+use crate::pin::Pin;
 
 // TODO: check for alignment requirements on this external data
 static FIRMWARE: &'static [u8] = include_bytes!("./BCM4345C0.hcd"); //PI 3 B+
-//static FIRMWARE: &'static [u8] = include_bytes!("./BCM43430A1.hcd"); //PI 2/3
+                                                                    //static FIRMWARE: &'static [u8] = include_bytes!("./BCM43430A1.hcd"); //PI 2/3
 
-
-pub struct UploadFWThought {
+pub struct UploadFirmwareThinkable<T>
+where
+    T: HcTransportLayer + 'static,
+{
+    hci: Arc<DataLock<Hci<T>>>,
     fw_offset: usize,
-    packet: Option<HciPacket<HciCommandVendorBcm>>,
-    transport: SharedTransportLayer,
+    command: SendCommandThinkable<HciCommandVendorBcm, T>,
 }
 
-impl UploadFWThought {
+impl<T> UploadFirmwareThinkable<T>
+where
+    T: HcTransportLayer,
+{
+    unsafe_unpinned!(hci: Arc<DataLock<Hci<T>>>);
+    unsafe_unpinned!(fw_offset: usize);
+    unsafe_unpinned!(command: SendCommandThinkable<HciCommandVendorBcm, T>);
 
-    pub fn new(transport: SharedTransportLayer) -> Self {
-        let mut thought = Self {
-            fw_offset: 0,
-            packet: None,
-            transport
-        };
-        let packet = thought.next_packet();
-        thought.packet.replace(packet);
+    pub fn new(hci: Arc<DataLock<Hci<T>>>) -> Self {
+        // calculate initial command to be send from firmware binary upload blob
+        let op_code: HciCommand = (FIRMWARE[0] as u16 | (FIRMWARE[1] as u16) << 8).into();
+        let chunk_size = FIRMWARE[2];
+        let chunk_end = 3 + chunk_size as usize;
+        // update the offset to point to the next chunk in the FW blob
+        let fw_offset = chunk_end;
 
-        thought
+        Self {
+            hci: hci.clone(),
+            fw_offset,
+            command: SendCommandThinkable::new(
+                HciCommandVendorBcm::new(op_code, &FIRMWARE[3..chunk_end]),
+                hci,
+            ),
+        }
     }
 
     // get the next packet to upload the fw blob to the BT Host
-    fn next_packet(&mut self) -> HciPacket<HciCommandVendorBcm> {
-        let op_code: HciCommand = (FIRMWARE[self.fw_offset] as u16 | (FIRMWARE[self.fw_offset+1] as u16) << 8).into();
-        let chunk_size = FIRMWARE[self.fw_offset+2];
-        let chunk_start = self.fw_offset+3;
+    fn next_command(&mut self) -> HciCommandVendorBcm {
+        let op_code: HciCommand =
+            (FIRMWARE[self.fw_offset] as u16 | (FIRMWARE[self.fw_offset + 1] as u16) << 8).into();
+        let chunk_size = FIRMWARE[self.fw_offset + 2];
+        let chunk_start = self.fw_offset + 3;
         let chunk_end = chunk_start + chunk_size as usize;
         // update the offset to point to the next chunk in the FW blob
         self.fw_offset += (chunk_size + 3) as usize;
 
-        HciPacket {
-            p_type: HciPacketType::Command,
-            p_data: HciCommandVendorBcm::new(
-                op_code,
-                &FIRMWARE[chunk_start..chunk_end],
-            ),
-        }
+        HciCommandVendorBcm::new(op_code, &FIRMWARE[chunk_start..chunk_end])
     }
 }
 
-impl Thinkable for UploadFWThought {
-    type Output = ();
+impl<T> Thinkable for UploadFirmwareThinkable<T>
+where
+    T: HcTransportLayer,
+{
+    type Output = Result<(), BoxError>;
 
-    fn think(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Conclusion<Self::Output> {
-        let this = unsafe { self.get_unchecked_mut() };
-        if this.packet.is_some() {
-            //info!("send fw chunk");
-            let waker = cx.waker().clone();
-            let packet = this.packet.take().unwrap();
-            this.transport.take_for(|trans| trans.send_waking_packet(packet, waker));
-            Conclusion::Pending
-        } else {
-            let response = this.transport.take_for(|trans| trans.recv_response());
-            if let Some(response) = response {
-                //info!("upload response {:?}", response);
-                if this.fw_offset < FIRMWARE.len() {
-                    let next = this.next_packet();
-                    this.packet.replace(next);
+    fn think(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Conclusion<Self::Output> {
+        let command = self.as_mut().command();
+        let mut pin_command = Box::pin(command);
+        match pin_command.as_mut().think(cx) {
+            //self.as_mut().command().think(cx) {
+            Conclusion::Pending => Conclusion::Pending,
+            Conclusion::Ready(_) => {
+                // if the upload command finished send the next chunk of firmware as long as
+                // not all has been send
+                if *self.as_mut().fw_offset() < FIRMWARE.len() {
+                    let next_command = self.as_mut().next_command();
+                    let hci_clone = self.as_ref().hci.clone();
+                    *self.as_mut().command() = SendCommandThinkable::new(next_command, hci_clone);
+                    // wake my self
                     cx.waker().wake_by_ref();
-                    return Conclusion::Pending;
+                    Conclusion::Pending
                 } else {
-                    //info!("fw upload done");
-                    return Conclusion::Ready(());
+                    Conclusion::Ready(Ok(()))
                 }
             }
-            Conclusion::Pending
         }
     }
 }
