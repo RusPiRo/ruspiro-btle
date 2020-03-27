@@ -105,7 +105,18 @@ pub trait IsHciCommand: Sized + core::fmt::Debug {
     }
 }
 
-pub struct SendCommandThinkable<C, T>
+/// Send a command asynchronously to the BT host controller.
+/// It takes a [HciCommand] and the required Host Controller Interface
+/// using a specific Transport Layer
+pub fn send_command<C, T>(command: C, hci: Arc<DataLock<Hci<T>>>) -> impl Thinkable<Output = Result<(), BoxError>>
+    where
+        C: commands::IsHciCommand,
+        T: HcTransportLayer + 'static,
+{
+    SendCommandThinkable::new(command, hci)
+}
+
+struct SendCommandThinkable<C, T>
 where
     C: commands::IsHciCommand,
     T: HcTransportLayer + 'static,
@@ -123,7 +134,7 @@ where
     unsafe_unpinned!(packet: Option<packet::HciPacket<C>>);
     unsafe_unpinned!(hci: Arc<DataLock<Hci<T>>>);
 
-    pub fn new(command: C, hci: Arc<DataLock<Hci<T>>>) -> Self {
+    fn new(command: C, hci: Arc<DataLock<Hci<T>>>) -> Self {
         Self {
             hci,
             op_code: command.op_code(),
